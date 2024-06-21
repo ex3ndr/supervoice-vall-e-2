@@ -1,0 +1,189 @@
+import torch
+from torch import nn
+import math
+import torch.nn.functional as F
+from einops import rearrange, repeat, reduce, pack, unpack
+from torch.cuda.amp import autocast
+from .tensors import RMSNorm
+from flash_attn import flash_attn_func
+
+class Transformer(nn.Module):
+    def __init__(self, 
+        n_heads,
+        n_layers,
+        n_dim,
+        n_dim_head,
+        n_dim_ffn,
+        att_dropout, 
+        ffn_dropout,
+        position_embedding = 'alibi', # or rotary
+        enable_skip_connections = False
+    ):
+        super(Transformer, self).__init__()
+        self.n_layers = n_layers
+        self.n_heads = n_heads
+        self.enable_skip_connections = enable_skip_connections
+
+        # Attention blocks
+        self.layers = torch.nn.ModuleList([])
+        for i in range(n_layers):
+            self.layers.append(AttentionBlock(
+                n_heads = n_heads, 
+                n_dim = n_dim, 
+                n_dim_head = n_dim_head, 
+                n_dim_ffn = n_dim_ffn,
+                att_dropout = att_dropout,
+                ffn_dropout = ffn_dropout
+            ))
+        
+        # Skip connections
+        self.skip_combiners = torch.nn.ModuleList([])
+        if enable_skip_connections:
+            for i in range(n_layers//2):
+                self.skip_combiners.append(torch.nn.Linear(n_dim * 2, n_dim))
+
+        # Output normalization
+        self.output_norm = RMSNorm(n_dim)
+
+        # Positional embedding
+        self.position_embedding = position_embedding
+        if position_embedding == 'alibi':
+            self.register_buffer('alibi_slopes', get_slopes_power_of_2(n_heads))
+        elif position_embedding == 'rotary':
+            theta = 50000
+            self.register_buffer('inv_freq', 1.0 / (theta ** (torch.arange(0, n_dim_head, 2).float() / n_dim)))
+
+
+    def forward(self, x, casual = False):
+        batch, seq_len, *_ = x.shape
+
+        # Embeddings
+        alibi = None
+        rotational = None
+
+        # Compute ALiBi
+        # This computes ALiBi bias mask, excluding non-bias tokens which are expected to be appended to the end of the sequence
+        # Inspired by: https://github.com/ofirpress/attention_with_linear_biases/issues/5
+        if self.position_embedding == 'alibi':
+            alibi = self.alibi_slopes
+
+        # Compute rotary embeddings
+        if self.position_embedding == 'rotary':
+            rt = torch.arange(seq_len, device = self.inv_freq.device, dtype = self.inv_freq.dtype)
+            freqs = torch.einsum('i , j -> i j', rt, self.inv_freq)
+            rotational =  torch.cat((freqs, freqs), dim = -1)
+
+        # Run through attention blocks
+        connections = []
+        for i in range(self.n_layers):
+
+            # Skip connection
+            if self.n_layers - (self.n_layers // 2) < i and self.enable_skip_connections:
+                s = connections.pop()
+                x = torch.cat([x, s], dim = -1)
+                x = self.skip_combiners[i - (self.n_layers // 2)](x)
+
+            # Attention
+            x = self.layers[i](x, alibi = alibi, rotational = rotational)
+
+            # Skip connection
+            if i <= self.n_layers // 2:
+                connections.append(x)
+
+        # Output normalization
+        x = self.output_norm(x)
+
+        # Result
+        return x
+
+
+class AttentionBlock(torch.nn.Module):
+    def __init__(self, n_heads, n_dim, n_dim_head, n_dim_ffn, att_dropout, ffn_dropout):
+        super(AttentionBlock, self).__init__()
+
+        self.n_heads = n_heads
+        self.n_dim_head = n_dim_head
+        self.att_dropout = att_dropout
+
+        # Attention input layer norm
+        self.attention_ln = RMSNorm(n_dim)
+
+        # Input -> Query/Key/Value for each head in single tensor for speedup
+        self.attention = nn.Linear(n_dim, 3 * n_dim_head * n_heads, bias=False)
+        torch.nn.init.normal_(self.attention.weight, mean=0.0, std=0.02)
+
+        # Attention dropout
+        # self.attention_dropout = nn.Dropout(att_dropout)
+
+        # Output flatten multiple heads into single tensor
+        self.attention_output = nn.Linear(n_dim_head * n_heads, n_dim, bias=False)
+        torch.nn.init.normal_(self.attention_output.weight, mean=0.0, std=0.02)
+
+        # Attention dropout
+        # self.attention_output_dropout = nn.Dropout(dropout)
+
+        # MLP part
+        self.mlp_ln = RMSNorm(n_dim)
+        self.mlp_input = nn.Linear(n_dim, n_dim_ffn)
+        self.mlp_output = nn.Linear(n_dim_ffn, n_dim)
+        self.mlp_output_dropout = nn.Dropout(ffn_dropout)
+
+    def forward(self, x, alibi = None, rotational = None):
+
+        B, T, C = x.size() # batch size, sequence length, context width
+
+        # Residual
+        residual = x
+
+        # Input normalization
+        y = self.attention_ln(x)
+
+        # Calculation Q/K/V for each head
+        q, k, v = self.attention(y).chunk(3, dim = -1)
+        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b n h d', h = self.n_heads), (q, k, v))
+        
+        # Rotary embedding
+        if rotational is not None:
+            q = apply_rotary_pos_emb(rotational, q)
+            k = apply_rotary_pos_emb(rotational, k)
+
+        # Flash Attention
+        y = flash_attn_func(q, k, v, dropout_p = self.att_dropout if self.training else 0.0, alibi_slopes = alibi)
+
+        # Reassemble all head outputs side by side
+        y = y.transpose(1, 2).contiguous().view(B, T, self.n_heads * self.n_dim_head) # re-assemble all head outputs side by side
+
+        # Output
+        y = self.attention_output(y)
+        # y = self.attention_output_dropout(y)
+
+        # Residual
+        y = residual + y
+        residual = y
+
+        # MLP
+        y = self.mlp_ln(y)
+        y = self.mlp_input(y)
+        y = F.gelu(y)
+        y = self.mlp_output(y)
+        y = self.mlp_output_dropout(y)
+        y = residual + y
+
+        return y
+
+#
+# Embeddings implementation
+#
+
+def get_slopes_power_of_2(n_heads):
+    start = (2**(-2**-(math.log2(n_heads)-3)))
+    ratio = start
+    return torch.tensor([start*ratio**i for i in range(n_heads)], dtype=torch.float32)
+
+def rotate_half(x):
+    x1, x2 = x.chunk(2, dim = -1)
+    return torch.cat((-x2, x1), dim = -1)
+
+@autocast(enabled = False)
+def apply_rotary_pos_emb(pos, t):
+    return t * pos.cos() + rotate_half(t) * pos.sin()
