@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 from einops import rearrange
 import random
+import numpy as np
 
 class RMSNorm(torch.nn.Module):
     def __init__(self, dim):
@@ -86,3 +87,10 @@ def random_interval_masking(batch_size, length, *, min_size, min_count, max_coun
             tensor[i, int(p):int(p + l)] = True
 
     return tensor
+
+def sinusoids(length, channels, max_timescale=10000):
+    assert channels % 2 == 0
+    log_timescale_increment = np.log(max_timescale) / (channels // 2 - 1)
+    inv_timescales = torch.exp(-log_timescale_increment * torch.arange(channels // 2))
+    scaled_time = torch.arange(length)[:, np.newaxis] * inv_timescales[np.newaxis, :]
+    return torch.cat([torch.sin(scaled_time), torch.cos(scaled_time)], dim=1)

@@ -1,12 +1,14 @@
 import torch
+from torch.nn import functional as F
 from .transformer import Transformer
+from .tensors import sinusoids
 
 class SupervoceNARModel(torch.nn.Module):
     def __init__(self):
         super(SupervoceNARModel, self).__init__()
 
         self.n_dim = 1024
-        self.max_seq_len = 1024
+        self.max_seq_len = 8 * 1024
 
         self.transformer = Transformer(
             n_heads = 16,
@@ -19,26 +21,34 @@ class SupervoceNARModel(torch.nn.Module):
             position_embedding = None,
         )
 
+        # Sinusoidal positional embedding
+        self.register_buffer("positional_embedding", sinusoids(self.max_seq_len, self.n_dim))
+
         # Text Condition
-        self.text_positional_embedding = torch.nn.Embedding(self.max_seq_len, self.n_dim)
         self.text_embedding = torch.nn.Embedding(8 * 1024, self.n_dim)
+        torch.nn.init.normal_(self.text_embedding.weight, mean=0.0, std=0.02)
 
         # Audio embedding
-        self.audio_positional_embedding = torch.nn.Embedding(self.max_seq_len, self.n_dim)
         self.audio_embedding = torch.nn.Embedding(1024, self.n_dim)
+        torch.nn.init.normal_(self.audio_embedding.weight, mean=0.0, std=0.02)
 
         # EOS embedding
         self.eos_embedding = torch.nn.Embedding(1, self.n_dim)
+        torch.nn.init.normal_(self.eos_embedding.weight, mean=0.0, std=0.02)
 
         # Codec index embedding
         self.codec_index_embedding = torch.nn.Embedding(7, self.n_dim)
+        torch.nn.init.normal_(self.codec_index_embedding.weight, mean=0.0, std=0.02)
 
         # Output prediction
-        self.prediction = torch.nn.Linear(self.n_dim, 8 * 1024, bias=False)
+        self.prediction = torch.nn.Linear(self.n_dim, 1024, bias=False)
+
+        # Tie weights
+        self.audio_embedding.weight = self.prediction.weight
     
     def forward(self, *, condition_text, condition_audio, audio, codec, loss = False):
 
-        print(condition_text.shape, condition_audio.shape, audio.shape, codec)
+        # print(condition_text.shape, condition_audio.shape, audio.shape, codec)
 
         # Check shapes
         assert codec >= 1 and codec <= 7
@@ -56,8 +66,7 @@ class SupervoceNARModel(torch.nn.Module):
         
         # Prepare text condition
         x_t = torch.cat([self.text_embedding(condition_text), eos])
-        x_pt = self.text_positional_embedding(torch.arange(x_t.shape[0], device = x_t.device))
-        print(x_pt.shape, x_t.shape)
+        x_pt = self.positional_embedding[:x_t.shape[0]]
         x_t = x_t + x_pt
 
         # Prepare audio condition
@@ -72,7 +81,7 @@ class SupervoceNARModel(torch.nn.Module):
 
         # Prepare audio
         x_a = torch.cat([x_ea, x_ec, eos])
-        x_ap = self.audio_positional_embedding(torch.arange(x_a.shape[0], device = audio.device))
+        x_ap = self.positional_embedding[:x_a.shape[0]]
         x_a = x_a + x_ap
 
         # Prepare codec index
@@ -88,14 +97,14 @@ class SupervoceNARModel(torch.nn.Module):
         x = self.prediction(x)
 
         # Offsets
-        p_s = x_t.shape[0] + condition_audio.shape[0]
+        p_s = x_t.shape[0] + condition_audio.shape[1]
         p_e = p_s + audio.shape[1]
         predicted = x[p_s:p_e]
 
         # Loss
         if loss:
-            target = audio[codec][p_s, p_e]
-            loss = F.cross_entropy(x.view(-1, predicted.size(-1)), target.view(-1), ignore_index = 0)
+            target = audio[codec]
+            loss = F.cross_entropy(predicted, target)
             return predicted, loss
         else:
             return predicted

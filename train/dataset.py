@@ -21,19 +21,23 @@ def load_sampler(index, dir, tokenizer):
             ids.append(id)
 
     def sample():
+        while True:
+            try:
+                
+                # Pick ID
+                id = random.choice(ids)
 
-        # Pick ID
-        id = random.choice(ids)
+                # Load text
+                with open(dir + id + ".txt", 'r') as file:
+                    text = file.read()
+                    text = tokenizer.encode(text) if random.random() < 0.3 else tokenizer.encode_sample(text) # 30% chance of sampling optimal
 
-        # Load text
-        with open(dir + id + ".txt", 'r') as file:
-            text = file.read()
-            text = tokenizer.encode(text)
+                # Load encoded
+                encoded = torch.load(dir + id + ".pt")
 
-        # Load encoded
-        encoded = torch.load(dir + id + ".pt")
-
-        return encoded, text
+                return encoded, text
+            except:
+                pass
     
     return sample
 

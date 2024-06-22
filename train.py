@@ -29,12 +29,10 @@ from supervoice_valle import SupervoceNARModel, Tokenizer
 from train.dataset import load_sampler, create_async_loader
 
 # Train parameters
-train_experiment = "valle-01"
+train_experiment = "valle-05"
 train_project="supervoice-valle"
 train_auto_resume = True
-train_batch_size = 48 # Per GPU
-train_sequence_length = 256
-train_grad_accum_every = 4 # Simulate 8 gpus using 2 gpus
+train_grad_accum_every = 8 # Simulate 16 gpus using 2 gpus
 train_steps = 600000
 train_loader_workers = 2
 train_log_every = 1
@@ -67,8 +65,8 @@ def main():
     # Prepare dataset
     accelerator.print("Loading dataset...")
     tokenizer = Tokenizer("./tokenizer_text.model")
-    # train_sampler = load_sampler("./external_datasets/libriheavy/libriheavy_cuts_medium.jsonl.gz", "./external_datasets/libriheavy-medium-encodec/", tokenizer)
-    train_sampler = load_sampler("./external_datasets/libriheavy/libriheavy_cuts_small.jsonl.gz", "./external_datasets/libriheavy-encodec/", tokenizer)
+    train_sampler = load_sampler("./external_datasets/libriheavy/libriheavy_cuts_medium.jsonl.gz", "./external_datasets/libriheavy-medium-encodec/", tokenizer)
+    # train_sampler = load_sampler("./external_datasets/libriheavy/libriheavy_cuts_small.jsonl.gz", "./external_datasets/libriheavy-encodec/", tokenizer)
     train_loader = create_async_loader(train_sampler, num_workers = train_loader_workers)
     train_cycle = cycle(train_loader)
 
@@ -89,10 +87,8 @@ def main():
     # Accelerate
     model, optim = accelerator.prepare(model, optim)
     hps = {
-        "sequence_length": train_sequence_length, 
         "train_lr_start": train_lr_start, 
         "train_lr_max": train_lr_max, 
-        "batch_size": train_batch_size, 
         "grad_accum_every": train_grad_accum_every,
         "steps": train_steps, 
         "warmup_steps": train_warmup_steps,
@@ -162,7 +158,12 @@ def main():
                     audio = audio.squeeze(0)
                     text = text.squeeze(0)
                     audio_duration = audio.shape[1]
-                    audio_split = audio_duration // 2 # Split audio in half
+                    min_duration = 75 * 3
+                    max_duration = audio_duration // 2 
+                    if max_duration > min_duration:
+                        audio_split = random.randint(min_duration, max_duration)
+                    else:
+                        audio_split = max_duration
                     
                     # Forward
                     _, loss = model(
