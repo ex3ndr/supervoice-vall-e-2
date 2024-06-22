@@ -4,7 +4,7 @@ import math
 import random
 import torch
 
-def load_sampler(index, dir, tokenizer):
+def load_sampler(index, dir, batch_size, tokenizer):
 
     # Load ids
     ids = []
@@ -21,7 +21,10 @@ def load_sampler(index, dir, tokenizer):
             ids.append(id)
 
     def sample():
-        while True:
+        loaded = 0
+        res_encoded = []
+        res_text = []
+        while loaded < batch_size:
             try:
                 
                 # Pick ID
@@ -35,9 +38,14 @@ def load_sampler(index, dir, tokenizer):
                 # Load encoded
                 encoded = torch.load(dir + id + ".pt")
 
-                return encoded, text
+                # Append
+                res_text.append(text)
+                res_encoded.append(encoded)
+                loaded += 1
             except:
                 pass
+        
+        return res_encoded, res_text
     
     return sample
 

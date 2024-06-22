@@ -3,6 +3,7 @@ import torch.nn.functional as F
 from einops import rearrange
 import random
 import numpy as np
+from torch.nn.utils.rnn import pad_sequence
 
 class RMSNorm(torch.nn.Module):
     def __init__(self, dim):
@@ -94,3 +95,34 @@ def sinusoids(length, channels, max_timescale=10000):
     inv_timescales = torch.exp(-log_timescale_increment * torch.arange(channels // 2))
     scaled_time = torch.arange(length)[:, np.newaxis] * inv_timescales[np.newaxis, :]
     return torch.cat([torch.sin(scaled_time), torch.cos(scaled_time)], dim=1)
+
+def list_to_tensors(tensors):
+
+    # Calculate lengths
+    l = list(map(len, tensors))
+
+    # Padded tensors
+    padded = pad_sequence(tensors, batch_first=True, padding_value=0)
+
+    # Mask
+    mask = torch.zeros(padded.shape, dtype=torch.bool, device=padded.device)
+    for i, length in enumerate(l):
+        mask[i, length:] = True
+    
+    return padded, mask
+
+def join_tensors(tensors, sep = None):
+
+    # No separator
+    if sep is None:
+        return torch.cat(tensors)
+
+    # Initial
+    res = tensors[0]
+
+    # Join rest
+    for t in tensors[1:]:
+        res = torch.cat([res, sep, t])
+    
+    return res
+    

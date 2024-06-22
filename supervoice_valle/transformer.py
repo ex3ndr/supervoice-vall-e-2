@@ -16,7 +16,6 @@ class Transformer(nn.Module):
         n_dim_ffn,
         att_dropout, 
         ffn_dropout,
-        position_embedding = 'alibi', # or rotary
         enable_skip_connections = False
     ):
         super(Transformer, self).__init__()
@@ -45,33 +44,8 @@ class Transformer(nn.Module):
         # Output normalization
         self.output_norm = RMSNorm(n_dim)
 
-        # Positional embedding
-        self.position_embedding = position_embedding
-        if position_embedding == 'alibi':
-            self.register_buffer('alibi_slopes', get_slopes_power_of_2(n_heads))
-        elif position_embedding == 'rotary':
-            theta = 50000
-            self.register_buffer('inv_freq', 1.0 / (theta ** (torch.arange(0, n_dim_head, 2).float() / n_dim)))
-
-
     def forward(self, x, casual = False):
         batch, seq_len, *_ = x.shape
-
-        # Embeddings
-        alibi = None
-        rotational = None
-
-        # Compute ALiBi
-        # This computes ALiBi bias mask, excluding non-bias tokens which are expected to be appended to the end of the sequence
-        # Inspired by: https://github.com/ofirpress/attention_with_linear_biases/issues/5
-        if self.position_embedding == 'alibi':
-            alibi = self.alibi_slopes
-
-        # Compute rotary embeddings
-        if self.position_embedding == 'rotary':
-            rt = torch.arange(seq_len, device = self.inv_freq.device, dtype = self.inv_freq.dtype)
-            freqs = torch.einsum('i , j -> i j', rt, self.inv_freq)
-            rotational =  torch.cat((freqs, freqs), dim = -1)
 
         # Run through attention blocks
         connections = []
@@ -84,7 +58,7 @@ class Transformer(nn.Module):
                 x = self.skip_combiners[i - (self.n_layers // 2)](x)
 
             # Attention
-            x = self.layers[i](x, alibi = alibi, rotational = rotational)
+            x = self.layers[i](x)
 
             # Skip connection
             if i <= self.n_layers // 2:
@@ -128,7 +102,7 @@ class AttentionBlock(torch.nn.Module):
         self.mlp_output = nn.Linear(n_dim_ffn, n_dim)
         self.mlp_output_dropout = nn.Dropout(ffn_dropout)
 
-    def forward(self, x, alibi = None, rotational = None):
+    def forward(self, x):
 
         B, T, C = x.size() # batch size, sequence length, context width
 
@@ -141,14 +115,9 @@ class AttentionBlock(torch.nn.Module):
         # Calculation Q/K/V for each head
         q, k, v = self.attention(y).chunk(3, dim = -1)
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b n h d', h = self.n_heads), (q, k, v))
-        
-        # Rotary embedding
-        if rotational is not None:
-            q = apply_rotary_pos_emb(rotational, q)
-            k = apply_rotary_pos_emb(rotational, k)
 
         # Flash Attention
-        y = flash_attn_func(q, k, v, dropout_p = self.att_dropout if self.training else 0.0, alibi_slopes = alibi)
+        y = torch.nn.functional.scaled_dot_product_attention(q, k, v, dropout_p=self.att_dropout if self.training else 0.0)
 
         # Reassemble all head outputs side by side
         y = y.transpose(1, 2).contiguous().view(B, T, self.n_heads * self.n_dim_head) # re-assemble all head outputs side by side
@@ -170,20 +139,3 @@ class AttentionBlock(torch.nn.Module):
         y = residual + y
 
         return y
-
-#
-# Embeddings implementation
-#
-
-def get_slopes_power_of_2(n_heads):
-    start = (2**(-2**-(math.log2(n_heads)-3)))
-    ratio = start
-    return torch.tensor([start*ratio**i for i in range(n_heads)], dtype=torch.float32)
-
-def rotate_half(x):
-    x1, x2 = x.chunk(2, dim = -1)
-    return torch.cat((-x2, x1), dim = -1)
-
-@autocast(enabled = False)
-def apply_rotary_pos_emb(pos, t):
-    return t * pos.cos() + rotate_half(t) * pos.sin()

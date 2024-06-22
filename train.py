@@ -29,12 +29,13 @@ from supervoice_valle import SupervoceNARModel, Tokenizer
 from train.dataset import load_sampler, create_async_loader
 
 # Train parameters
-train_experiment = "valle-05"
+train_experiment = "valle-06"
 train_project="supervoice-valle"
 train_auto_resume = True
 train_grad_accum_every = 8 # Simulate 16 gpus using 2 gpus
 train_steps = 600000
-train_loader_workers = 2
+train_loader_workers = 32
+train_batch_size = 8
 train_log_every = 1
 train_save_every = 1000
 train_watch_every = 1000
@@ -65,7 +66,7 @@ def main():
     # Prepare dataset
     accelerator.print("Loading dataset...")
     tokenizer = Tokenizer("./tokenizer_text.model")
-    train_sampler = load_sampler("./external_datasets/libriheavy/libriheavy_cuts_medium.jsonl.gz", "./external_datasets/libriheavy-medium-encodec/", tokenizer)
+    train_sampler = load_sampler("./external_datasets/libriheavy/libriheavy_cuts_medium.jsonl.gz", "./external_datasets/libriheavy-medium-encodec/", train_batch_size, tokenizer)
     # train_sampler = load_sampler("./external_datasets/libriheavy/libriheavy_cuts_small.jsonl.gz", "./external_datasets/libriheavy-encodec/", tokenizer)
     train_loader = create_async_loader(train_sampler, num_workers = train_loader_workers)
     train_cycle = cycle(train_loader)
@@ -155,22 +156,33 @@ def main():
 
                     # Load batch
                     audio, text = next(train_cycle)
-                    audio = audio.squeeze(0)
-                    text = text.squeeze(0)
-                    audio_duration = audio.shape[1]
-                    min_duration = 75 * 3
-                    max_duration = audio_duration // 2 
-                    if max_duration > min_duration:
-                        audio_split = random.randint(min_duration, max_duration)
-                    else:
-                        audio_split = max_duration
+
+                    # Split audio
+                    texts = []
+                    audio_full = []
+                    audio_partial = []
+                    audio_codecs = []
+                    for B in range(len(audio)):
+                        a = audio[B].squeeze(0)
+                        t = text[B].squeeze(0)
+                        audio_duration = a.shape[1]
+                        min_duration = 75 * 3
+                        max_duration = audio_duration // 2 
+                        if max_duration > min_duration:
+                            audio_split = random.randint(min_duration, max_duration)
+                        else:
+                            audio_split = max_duration
+                        audio_full.append(a[:, :audio_split])
+                        audio_partial.append(a[:, audio_split:])
+                        audio_codecs.append(random.randint(1, 7))
+                        texts.append(t)
                     
                     # Forward
                     _, loss = model(
-                        condition_text = text,
-                        condition_audio = audio[:, :audio_split],
-                        audio = audio[:, audio_split:],
-                        codec = random.randint(1, 7),
+                        condition_text = texts,
+                        condition_audio = audio_full,
+                        audio = audio_partial,
+                        codec = audio_codecs,
                         loss = True
                     )
 
