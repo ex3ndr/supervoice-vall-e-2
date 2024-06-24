@@ -29,23 +29,23 @@ from supervoice_valle import SupervoceNARModel, Tokenizer
 from train.dataset import load_sampler, create_async_loader
 
 # Train parameters
-train_experiment = "valle-08"
+train_experiment = "valle-10"
 train_project="supervoice-valle"
 train_auto_resume = True
 train_grad_accum_every = 8 # Simulate 16 gpus using 2 gpus
 train_steps = 600000
 train_loader_workers = 32
-train_batch_size = 8
+train_batch_size = 2
 train_log_every = 1
 train_save_every = 1000
 train_watch_every = 1000
 train_evaluate_every = 200
 train_evaluate_batches = 10
 train_lr_start = 1e-7
-train_lr_max = 5e-4
-train_warmup_steps = 32000
+train_lr_max = 4e-5
+train_warmup_steps = 5000
 train_mixed_precision = "fp16" # "bf16" or "fp16" or None
-train_clip_grad_norm = 100
+train_clip_grad_norm = 0.2
 train_compile = False
 
 # Train
@@ -66,8 +66,8 @@ def main():
     # Prepare dataset
     accelerator.print("Loading dataset...")
     tokenizer = Tokenizer("./tokenizer_text.model")
-    # train_sampler = load_sampler("./external_datasets/libriheavy/libriheavy_cuts_medium.jsonl.gz", "./external_datasets/libriheavy-medium-encodec/", train_batch_size, tokenizer)
-    train_sampler = load_sampler("./external_datasets/libriheavy/libriheavy_cuts_small.jsonl.gz", "./external_datasets/libriheavy-encodec/", train_batch_size, tokenizer)
+    train_sampler = load_sampler("./external_datasets/libriheavy/libriheavy_cuts_medium.jsonl.gz", "./external_datasets/libriheavy-medium-encodec/", train_batch_size, tokenizer)
+    # train_sampler = load_sampler("./external_datasets/libriheavy/libriheavy_cuts_small.jsonl.gz", "./external_datasets/libriheavy-encodec/", train_batch_size, tokenizer)
     train_loader = create_async_loader(train_sampler, num_workers = train_loader_workers)
     train_cycle = cycle(train_loader)
 

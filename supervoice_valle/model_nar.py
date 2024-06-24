@@ -2,6 +2,7 @@ import torch
 from torch.nn import functional as F
 from .transformer import Transformer
 from .tensors import sinusoids, list_to_tensors
+from torch.nn.utils.rnn import pad_sequence
 
 class SupervoceNARModel(torch.nn.Module):
     def __init__(self):
@@ -22,6 +23,7 @@ class SupervoceNARModel(torch.nn.Module):
 
         # Sinusoidal positional embedding
         self.register_buffer("positional_embedding", sinusoids(self.max_seq_len, self.n_dim))
+        # self.positional_embedding = torch.nn.Embedding(self.max_seq_len, self.n_dim)
 
         # Text Condition
         self.text_embedding = torch.nn.Embedding(8 * 1024, self.n_dim)
@@ -43,22 +45,33 @@ class SupervoceNARModel(torch.nn.Module):
         self.prediction = torch.nn.Linear(self.n_dim, 1024, bias=False)
     
     def forward(self, *, condition_text, condition_audio, audio, codec, loss = False):
+        
+        # Check inputs
         device = condition_text[0].device
-
-        # print(condition_text.shape, condition_audio.shape, audio.shape, codec)
+        B = len(condition_text)
+        assert len(condition_audio) == B
+        assert len(audio) == B
+        assert len(codec) == B
 
         # Check shapes
-        # assert codec >= 1 and codec <= 7
-        # # [N]
-        # assert len(condition_text.shape) == 1
-        #  # [8, N]
-        # assert len(condition_audio.shape) == 2
-        # assert condition_audio.shape[0] == 8
-        #  # [<codec>, N]
-        # assert len(audio.shape) == 2
-        # assert audio.shape[0] >= codec
+        for b in range(B):
 
+            # Check condition shape
+            assert condition_text[b].dim() == 1, f"Unexpected shape: {condition_text[b].shape}"
+            assert condition_audio[b].dim() == 2, f"Unexpected shape: {condition_audio[b].shape}"
+            assert condition_audio[b].shape[0] == 8, f"Unexpected shape: {condition_audio[b].shape}"
+
+            # Check codec value
+            assert codec[b] >= 1 and codec[b] <= 7, f"Unexpected codec value: {codec[b]}"
+
+            # Check audio shape
+            assert audio[b].dim() == 2, f"Unexpected shape: {audio[b].shape}"
+            assert audio[b].shape[0] >= codec[b], f"Unexpected shape: {audio[b].shape}"
+
+        #
         # Prepare EOS
+        #
+
         eos = self.eos_embedding(torch.tensor([0], device = device))
         
         #
@@ -66,9 +79,10 @@ class SupervoceNARModel(torch.nn.Module):
         #
         l_t = []
         x_t = []
-        for i in range(len(condition_text)):
-            t = torch.cat([self.text_embedding(condition_text[i]), eos])
+        for b in range(B):
+            t = torch.cat([self.text_embedding(condition_text[b]), eos])
             t = t + self.positional_embedding[:t.shape[0]]
+            # t = t + self.positional_embedding(torch.arange(t.shape[0], device = t.device))
             x_t.append(t)
             l_t.append(t.shape[0])
 
@@ -79,7 +93,7 @@ class SupervoceNARModel(torch.nn.Module):
         x_a = []
         l_c = []
         l_a = []
-        for b in range(len(condition_audio)):
+        for b in range(B):
 
             # Condition embedding
             t_c = self.audio_embedding(condition_audio[b][0])
@@ -88,72 +102,70 @@ class SupervoceNARModel(torch.nn.Module):
 
             # Audio embedding
             t_a = self.audio_embedding(audio[b][0])
-            for j in range(1, codec[b] - 1):
+            for i in range(1, codec[b]):
                 t_a = t_a + self.audio_embedding(audio[b][i])
             
-            # Codec embedding
-            t_ci = self.codec_index_embedding(torch.tensor([codec[b] - 1], device = device).long())
-
             # Concatenate all
-            t = torch.cat([t_c, t_a, eos, t_ci])
+            t = torch.cat([t_c, t_a, eos])
 
             # Positional embedding
-            t[:t.shape[0] - 1] = t[:t.shape[0] - 1] + self.positional_embedding[:t.shape[0] - 1]
+            t = t + self.positional_embedding[:t.shape[0]]
+            # t = t + self.positional_embedding(torch.arange(t.shape[0], device = t.device))
 
             # Append
             x_a.append(t)
             l_c.append(t_c.shape[0])
             l_a.append(t_a.shape[0])
+
+        #
+        # Codec embedding
+        #
+
+        x_ci = []
+        for b in range(B):
+            t_ci = self.codec_index_embedding(torch.tensor([codec[b] - 1], device = device).long())
+            x_ci.append(t_ci)
         
         #
         # Concatenate all
         #
 
         x = []
-        x_l = []
-        for i in range(len(x_t)):
-            x.append(torch.cat([x_t[i], x_a[i]]))
-            x_l.append(x[i].shape[0])
-
-            
+        for b in range(B):
+            x.append(torch.cat([x_t[b], x_a[b], x_ci[b]]))
         x, m = list_to_tensors(x)
         m = m.unsqueeze(-1).unsqueeze(-1)
-        # s = ""
-        # for i in range(len(m)):
-        #     for j in range(len(m[i])):
-        #         if m[i][j][0][0]:
-        #             s += "1"
-        #         else:
-        #             s += "0"
-        #     s += "\n"
-        # print(s)
-        # print("1", torch.isnan(x).any(), torch.isinf(x).any())
 
+        #
         # Transform
-        x = self.transformer(x, mask = m)
-        # print("2", torch.isnan(x).any(), torch.isinf(x).any())
+        #
 
+        x = self.transformer(x)
+
+        #
         # Predict
-        x = self.prediction(x)
-        # print("3", torch.isnan(x).any(), torch.isinf(x).any())
+        #
 
-        # Load predictions
+        x = self.prediction(x)
+
+        #
+        # Extract predictions
+        #
+
         predicted = []
-        total = 0
-        for i in range(len(x_t)):
+        for i in range(B):
             p_s = l_t[i] + l_c[i]
             p_e = p_s + l_a[i]
             predicted.append(x[i, p_s:p_e])
-            total += p_e - p_s
 
+        #
         # Loss
+        #
+
         if loss:
-            losses = []
-            for i in range(len(x_t)):
-                target = audio[i][codec[i]]
-                loss = F.cross_entropy(predicted[i], target, reduction = "sum")
-                losses.append(loss)
-            loss = torch.sum(torch.stack(losses)) / total
+            source = pad_sequence(predicted, batch_first=True, padding_value=-1)
+            targets = pad_sequence([audio[i][codec[i]] for i in range(B)], batch_first=True, padding_value=-1)
+            loss = F.cross_entropy(source.view(-1, source.size(-1)), targets.view(-1), ignore_index = -1)
             return predicted, loss
         else:
             return predicted

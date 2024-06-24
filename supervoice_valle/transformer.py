@@ -134,8 +134,8 @@ class AttentionBlock(torch.nn.Module):
         y = self.mlp_ln(y)
         y = self.mlp_input(y)
         y = F.gelu(y)
-        y = self.mlp_output(y)
         y = self.mlp_output_dropout(y)
+        y = self.mlp_output(y)
         y = residual + y
 
         return y
