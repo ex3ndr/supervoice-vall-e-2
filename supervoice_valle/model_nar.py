@@ -41,9 +41,6 @@ class SupervoceNARModel(torch.nn.Module):
 
         # Output prediction
         self.prediction = torch.nn.Linear(self.n_dim, 1024, bias=False)
-
-        # Tie weights
-        self.audio_embedding.weight = self.prediction.weight
     
     def forward(self, *, condition_text, condition_audio, audio, codec, loss = False):
         device = condition_text[0].device
@@ -113,31 +110,50 @@ class SupervoceNARModel(torch.nn.Module):
         #
 
         x = []
+        x_l = []
         for i in range(len(x_t)):
             x.append(torch.cat([x_t[i], x_a[i]]))
+            x_l.append(x[i].shape[0])
+
+            
         x, m = list_to_tensors(x)
+        m = m.unsqueeze(-1).unsqueeze(-1)
+        # s = ""
+        # for i in range(len(m)):
+        #     for j in range(len(m[i])):
+        #         if m[i][j][0][0]:
+        #             s += "1"
+        #         else:
+        #             s += "0"
+        #     s += "\n"
+        # print(s)
+        # print("1", torch.isnan(x).any(), torch.isinf(x).any())
 
         # Transform
-        x = self.transformer(x)
+        x = self.transformer(x, mask = m)
+        # print("2", torch.isnan(x).any(), torch.isinf(x).any())
 
         # Predict
         x = self.prediction(x)
+        # print("3", torch.isnan(x).any(), torch.isinf(x).any())
 
         # Load predictions
         predicted = []
+        total = 0
         for i in range(len(x_t)):
             p_s = l_t[i] + l_c[i]
             p_e = p_s + l_a[i]
             predicted.append(x[i, p_s:p_e])
+            total += p_e - p_s
 
         # Loss
         if loss:
             losses = []
             for i in range(len(x_t)):
-                target = audio[i][codec[i] - 1]
-                loss = F.cross_entropy(predicted[i], target)
+                target = audio[i][codec[i]]
+                loss = F.cross_entropy(predicted[i], target, reduction = "sum")
                 losses.append(loss)
-            loss = torch.mean(torch.stack(losses))
+            loss = torch.sum(torch.stack(losses)) / total
             return predicted, loss
         else:
             return predicted

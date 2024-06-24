@@ -44,7 +44,7 @@ class Transformer(nn.Module):
         # Output normalization
         self.output_norm = RMSNorm(n_dim)
 
-    def forward(self, x, casual = False):
+    def forward(self, x, mask = None, casual = False):
         batch, seq_len, *_ = x.shape
 
         # Run through attention blocks
@@ -58,7 +58,7 @@ class Transformer(nn.Module):
                 x = self.skip_combiners[i - (self.n_layers // 2)](x)
 
             # Attention
-            x = self.layers[i](x)
+            x = self.layers[i](x, mask = mask)
 
             # Skip connection
             if i <= self.n_layers // 2:
@@ -102,7 +102,7 @@ class AttentionBlock(torch.nn.Module):
         self.mlp_output = nn.Linear(n_dim_ffn, n_dim)
         self.mlp_output_dropout = nn.Dropout(ffn_dropout)
 
-    def forward(self, x):
+    def forward(self, x, mask = None):
 
         B, T, C = x.size() # batch size, sequence length, context width
 
@@ -117,7 +117,7 @@ class AttentionBlock(torch.nn.Module):
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b n h d', h = self.n_heads), (q, k, v))
 
         # Flash Attention
-        y = torch.nn.functional.scaled_dot_product_attention(q, k, v, dropout_p=self.att_dropout if self.training else 0.0)
+        y = torch.nn.functional.scaled_dot_product_attention(q, k, v, dropout_p=self.att_dropout if self.training else 0.0, attn_mask = mask)
 
         # Reassemble all head outputs side by side
         y = y.transpose(1, 2).contiguous().view(B, T, self.n_heads * self.n_dim_head) # re-assemble all head outputs side by side

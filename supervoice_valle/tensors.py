@@ -105,9 +105,9 @@ def list_to_tensors(tensors):
     padded = pad_sequence(tensors, batch_first=True, padding_value=0)
 
     # Mask
-    mask = torch.zeros(padded.shape, dtype=torch.bool, device=padded.device)
-    for i, length in enumerate(l):
-        mask[i, length:] = True
+    mask = torch.zeros((padded.shape[0], padded.shape[1]), device=padded.device)
+    for i in range(len(l)):
+        mask[i, l[i]:] = -10000.0
     
     return padded, mask
 
