@@ -29,23 +29,31 @@ from supervoice_valle import SupervoceNARModel, Tokenizer
 from train.dataset import load_sampler, create_async_loader
 
 # Train parameters
-train_experiment = "valle-10"
+train_experiment = "valle-12"
 train_project="supervoice-valle"
 train_auto_resume = True
-train_grad_accum_every = 8 # Simulate 16 gpus using 2 gpus
+
+# We speculate that original paper has about 6k tokens per GPU
+# 6k tokens is routhly 2 batches, because a single row is a 1000-2500 tokens
+# We have MUCH faster GPUs and therefore instead of gradient accumulation,
+# we increase batch size 4x and reduce number of gradients to just 2x
+train_grad_accum_every = 2
+train_batch_size = 8
+
+# We speculate that learning rate is given for all GPUs, so we divide it by number of GPUs
+train_lr_start = 1e-10
+train_lr_max = 1e-5
 train_steps = 600000
+train_warmup_steps = 5000 # I am using faster warmup - it is more natural for me after working on voicebox
+
 train_loader_workers = 32
-train_batch_size = 2
 train_log_every = 1
 train_save_every = 1000
 train_watch_every = 1000
 train_evaluate_every = 200
 train_evaluate_batches = 10
-train_lr_start = 1e-7
-train_lr_max = 4e-5
-train_warmup_steps = 5000
 train_mixed_precision = "fp16" # "bf16" or "fp16" or None
-train_clip_grad_norm = 0.2
+train_clip_grad_norm = 0.2 # Common reproductions are using 100, but i am usually use 0.2
 train_compile = False
 
 # Train

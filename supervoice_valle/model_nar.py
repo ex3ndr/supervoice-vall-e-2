@@ -22,8 +22,9 @@ class SupervoceNARModel(torch.nn.Module):
         )
 
         # Sinusoidal positional embedding
-        self.register_buffer("positional_embedding", sinusoids(self.max_seq_len, self.n_dim))
-        # self.positional_embedding = torch.nn.Embedding(self.max_seq_len, self.n_dim)
+        # self.register_buffer("positional_embedding", sinusoids(self.max_seq_len, self.n_dim))
+        self.positional_embedding_text = torch.nn.Embedding(self.max_seq_len, self.n_dim)
+        self.positional_embedding_audio = torch.nn.Embedding(self.max_seq_len, self.n_dim)
 
         # Text Condition
         self.text_embedding = torch.nn.Embedding(8 * 1024, self.n_dim)
@@ -81,8 +82,8 @@ class SupervoceNARModel(torch.nn.Module):
         x_t = []
         for b in range(B):
             t = torch.cat([self.text_embedding(condition_text[b]), eos])
-            t = t + self.positional_embedding[:t.shape[0]]
-            # t = t + self.positional_embedding(torch.arange(t.shape[0], device = t.device))
+            # t = t + self.positional_embedding[:t.shape[0]]
+            t = t + self.positional_embedding_text(torch.arange(t.shape[0], device = t.device))
             x_t.append(t)
             l_t.append(t.shape[0])
 
@@ -109,8 +110,8 @@ class SupervoceNARModel(torch.nn.Module):
             t = torch.cat([t_c, t_a, eos])
 
             # Positional embedding
-            t = t + self.positional_embedding[:t.shape[0]]
-            # t = t + self.positional_embedding(torch.arange(t.shape[0], device = t.device))
+            # t = t + self.positional_embedding[:t.shape[0]]
+            t = t + self.positional_embedding_audio(torch.arange(t.shape[0], device = t.device))
 
             # Append
             x_a.append(t)
