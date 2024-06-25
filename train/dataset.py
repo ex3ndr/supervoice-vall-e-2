@@ -25,25 +25,28 @@ def load_sampler(index, dir, batch_size, tokenizer):
         res_encoded = []
         res_text = []
         while loaded < batch_size:
-            # try:
-                
             # Pick ID
             id = random.choice(ids)
 
-            # Load text
-            with open(dir + id + ".txt", 'r') as file:
-                text = file.read()
-                text = tokenizer.encode(text) if random.random() < 0.3 else tokenizer.encode_sample(text) # 30% chance of sampling optimal
+            try:
 
-            # Load encoded
-            encoded = torch.load(dir + id + ".pt")
+                # Load text
+                with open(dir + id + ".txt", 'r') as file:
+                    text = file.read()
+                    if text == "":
+                        raise Exception("Empty file")
+                    text = tokenizer.encode(text) if random.random() < 0.3 else tokenizer.encode_sample(text) # 30% chance of sampling optimal
 
-            # Append
-            res_text.append(text)
-            res_encoded.append(encoded)
-            loaded += 1
-            # except:
-            #     pass
+                # Load encoded
+                encoded = torch.load(dir + id + ".pt")
+
+                # Append
+                res_text.append(text)
+                res_encoded.append(encoded)
+                loaded += 1
+            except:
+                print("Invalid file: " + id)
+                pass
         
         return res_encoded, res_text
     

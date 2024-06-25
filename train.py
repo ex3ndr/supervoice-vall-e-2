@@ -13,6 +13,7 @@ from pathlib import Path
 import shutil
 import math
 import random
+import random
 
 # ML
 import torch
@@ -29,7 +30,7 @@ from supervoice_valle import SupervoceNARModel, Tokenizer
 from train.dataset import load_sampler, create_async_loader
 
 # Train parameters
-train_experiment = "valle-12"
+train_experiment = "valle-18"
 train_project="supervoice-valle"
 train_auto_resume = True
 
@@ -42,7 +43,7 @@ train_batch_size = 8
 
 # We speculate that learning rate is given for all GPUs, so we divide it by number of GPUs
 train_lr_start = 1e-10
-train_lr_max = 1e-5
+train_lr_max = 1e-4
 train_steps = 600000
 train_warmup_steps = 5000 # I am using faster warmup - it is more natural for me after working on voicebox
 
@@ -70,6 +71,8 @@ def main():
     torch.backends.cudnn.allow_tf32 = True
     lr_start = train_lr_start * accelerator.num_processes
     lr_max = train_lr_max * accelerator.num_processes
+    random_suffix = ''.join(random.choices('0123456789abcdef', k=6))
+    run_id = f"{train_experiment}-{random_suffix}"
 
     # Prepare dataset
     accelerator.print("Loading dataset...")
@@ -92,6 +95,13 @@ def main():
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max = train_steps)
     if train_compile:
         model = torch.compile(model)
+
+    # Checkpoint
+    checkpoint = None
+    if train_auto_resume and (output_dir / f"{train_experiment}.pt").exists():
+        checkpoint = torch.load(str(output_dir / f"{train_experiment}.pt"), map_location="cpu")
+        step = checkpoint['step']
+        run_id = checkpoint['run_id']
     
     # Accelerate
     model, optim = accelerator.prepare(model, optim)
@@ -104,7 +114,7 @@ def main():
         "mixed_precision": train_mixed_precision,
         "clip_grad_norm": train_clip_grad_norm,
     }
-    accelerator.init_trackers(train_project, config=hps)
+    accelerator.init_trackers(train_project, config=hps, init_kwargs={"wandb":{"name":run_id,  "id": run_id, "resume": "allow"}})
     if accelerator.is_main_process:
         wandb.watch(model, log="all", log_freq=train_watch_every * train_grad_accum_every)
 
@@ -121,7 +131,9 @@ def main():
             # Optimizer
             'optimizer': optim.state_dict(), 
             'scheduler': scheduler.state_dict(),
-            'step': step 
+            'scaler': accelerator.scaler.state_dict(),
+            'step': step,
+            'run_id': run_id,
 
         },  fname_step)
 
@@ -129,18 +141,11 @@ def main():
         shutil.copyfile(fname_step, fname)
 
     # Load
-    if train_auto_resume and (output_dir / f"{train_experiment}.pt").exists():
-        accelerator.print("Resuming training...")
-        checkpoint = torch.load(str(output_dir / f"{train_experiment}.pt"), map_location="cpu")
-
-         # Model
+    if checkpoint is not None:
         raw_model.load_state_dict(checkpoint['model'])
-
-        # Optimizer
         optim.load_state_dict(checkpoint['optimizer'])
         scheduler.load_state_dict(checkpoint['scheduler'])
-        step = checkpoint['step']
-
+        accelerator.scaler.load_state_dict(checkpoint['scaler'])
         accelerator. print(f'Loaded at #{step}')
 
     # Train step
@@ -193,7 +198,11 @@ def main():
                         codec = audio_codecs,
                         loss = True
                     )
-
+                    
+                    # Check if loss is NaN
+                    if torch.isnan(loss):
+                        raise ValueError("Loss is NaN")
+                        
                     # Backprop
                     optim.zero_grad()
                     accelerator.backward(loss)
@@ -226,7 +235,8 @@ def main():
         if step % train_log_every == 0:
             accelerator.log({
                 "learning_rate": lr,
-                "loss": loss
+                "loss": loss,
+                "scale": accelerator.scaler.get_scale() if accelerator.scaler is not None else 1.0
             }, step=step)
             accelerator.print(f'Step {step} | Loss: {loss} | LR: {lr}')
 
