@@ -25,13 +25,14 @@ from einops import rearrange, reduce, repeat
 from accelerate import Accelerator, DistributedDataParallelKwargs
 from accelerate.utils import set_seed
 import schedulefree
+from torch.profiler import profile, record_function, ProfilerActivity
 
 # Local
 from supervoice_valle import SupervoceNARModel, Tokenizer
 from train.dataset import load_sampler, create_async_loader
 
 # Train parameters
-train_experiment = "valle-25"
+train_experiment = "valle-27"
 train_project="supervoice-valle"
 train_auto_resume = True
 
@@ -80,8 +81,8 @@ def main():
     accelerator.print("Loading dataset...")
     tokenizer = Tokenizer("./tokenizer_text.model")
     # train_sampler = load_sampler("./external_datasets/libriheavy/libriheavy_cuts_medium.jsonl.gz", "./external_datasets/libriheavy-medium-encodec/", train_batch_size, tokenizer)
-    train_sampler = load_sampler("./external_datasets/libriheavy/libriheavy_cuts_large.jsonl.gz", "./external_datasets/libriheavy-large-encodec/", train_batch_size, tokenizer)
-    # train_sampler = load_sampler("./external_datasets/libriheavy/libriheavy_cuts_small.jsonl.gz", "./external_datasets/libriheavy-encodec/", train_batch_size, tokenizer)
+    # train_sampler = load_sampler("./external_datasets/libriheavy/libriheavy_cuts_large.jsonl.gz", "./external_datasets/libriheavy-large-encodec/", train_batch_size, tokenizer)
+    train_sampler = load_sampler("./external_datasets/libriheavy/libriheavy_cuts_small.jsonl.gz", "./external_datasets/libriheavy-encodec/", train_batch_size, tokenizer)
     train_loader = create_async_loader(train_sampler, num_workers = train_loader_workers)
     train_cycle = cycle(train_loader)
 
@@ -179,58 +180,68 @@ def main():
             lr = lr_max / accelerator.num_processes
 
         # Load batch
-        for _ in range(train_grad_accum_every):
-            with accelerator.accumulate(model):
-                with accelerator.autocast():
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], profile_memory=True, record_shapes=True) as prof:
+            for _ in range(train_grad_accum_every):
+                with accelerator.accumulate(model):
+                    with accelerator.autocast():
 
-                    # Load batch
-                    audio, text = next(train_cycle)
+                        # Load Batch
+                        with record_function("load_batch"):
 
-                    # Split audio
-                    texts = []
-                    audio_full = []
-                    audio_partial = []
-                    audio_codecs = []
-                    for B in range(len(audio)):
-                        a = audio[B].squeeze(0)
-                        t = text[B].squeeze(0)
-                        audio_duration = a.shape[1]
-                        min_duration = 75 * 3
-                        max_duration = audio_duration // 2 
-                        if max_duration > min_duration:
-                            audio_split = random.randint(min_duration, max_duration)
-                        else:
-                            audio_split = max_duration
-                        audio_full.append(a[:, :audio_split].to(device, non_blocking=True))
-                        audio_partial.append(a[:, audio_split:].to(device, non_blocking=True))
-                        audio_codecs.append(random.randint(1, 7))
-                        texts.append(t.to(device, non_blocking=True))
+                            # Load batch
+                            audio, text = next(train_cycle)
 
-                    # Forward
-                    _, loss = model(
-                        condition_text = texts,
-                        condition_audio = audio_full,
-                        audio = audio_partial,
-                        codec = audio_codecs,
-                        loss = True
-                    )
+                            # Split audio
+                            texts = []
+                            audio_full = []
+                            audio_partial = []
+                            audio_codecs = []
+                            for B in range(len(audio)):
+                                a = audio[B].squeeze(0)
+                                t = text[B].squeeze(0)
+                                audio_duration = a.shape[1]
+                                min_duration = 75 * 3
+                                max_duration = audio_duration // 2 
+                                if max_duration > min_duration:
+                                    audio_split = random.randint(min_duration, max_duration)
+                                else:
+                                    audio_split = max_duration
+                                audio_full.append(a[:, :audio_split].to(device, non_blocking=True))
+                                audio_partial.append(a[:, audio_split:].to(device, non_blocking=True))
+                                audio_codecs.append(random.randint(1, 7))
+                                texts.append(t.to(device, non_blocking=True))
+
+                        # Forward
+                        with record_function("forward"):
+                            _, loss = model(
+                                condition_text = texts,
+                                condition_audio = audio_full,
+                                audio = audio_partial,
+                                codec = audio_codecs,
+                                loss = True
+                            )
                     
-                    # Check if loss is NaN
-                    if torch.isnan(loss):
-                        raise ValueError("Loss is NaN")
+                            # Check if loss is NaN
+                            if torch.isnan(loss):
+                                raise ValueError("Loss is NaN")
                         
-                    # Backprop
-                    optim.zero_grad()
-                    accelerator.backward(loss)
-                    if accelerator.sync_gradients:
-                        accelerator.clip_grad_norm_(model.parameters(), train_clip_grad_norm)
-                    optim.step()
+                        # Backprop
+                        with record_function("backward"):
+                            optim.zero_grad()
+                            accelerator.backward(loss)
+                            if accelerator.sync_gradients:
+                                accelerator.clip_grad_norm_(model.parameters(), train_clip_grad_norm)
+                            optim.step()
 
-                    # Log skipping step
-                    if not train_schedule_free:
-                        if optim.step_was_skipped:
-                            accelerator.print("Step was skipped")
-
+                            # Log skipping step
+                            if not train_schedule_free:
+                                if optim.step_was_skipped:
+                                    accelerator.print("Step was skipped")
+        
+        if accelerator.is_main_process:
+            print(prof.key_averages().table(sort_by="self_cpu_memory_usage", row_limit=50))
+            print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=50))
+        
         return loss, lr
 
     #
@@ -255,7 +266,7 @@ def main():
                 "loss": loss,
                 "scale": accelerator.scaler.get_scale() if accelerator.scaler is not None else 1.0
             }, step=step)
-            accelerator.print(f'Step {step} | Loss: {loss} | LR: {lr}')
+            accelerator.print(f'Step {step} | Loss: {loss} | LR: {lr} | Time: {end - start}')
 
         # Save
         if step % train_save_every == 0:

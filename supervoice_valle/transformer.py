@@ -6,6 +6,7 @@ from einops import rearrange, repeat, reduce, pack, unpack
 from torch.cuda.amp import autocast
 from .tensors import RMSNorm
 from flash_attn import flash_attn_func
+from torch.profiler import record_function
 
 class Transformer(nn.Module):
     def __init__(self, 
@@ -58,7 +59,8 @@ class Transformer(nn.Module):
                 x = self.skip_combiners[i - (self.n_layers // 2)](x)
 
             # Attention
-            x = self.layers[i](x, mask = mask)
+            with record_function("attention"):
+                x = self.layers[i](x, mask = mask)
 
             # Skip connection
             if i <= self.n_layers // 2:
@@ -117,7 +119,10 @@ class AttentionBlock(torch.nn.Module):
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b n h d', h = self.n_heads), (q, k, v))
 
         # Flash Attention
-        y = torch.nn.functional.scaled_dot_product_attention(q, k, v, dropout_p=self.att_dropout if self.training else 0.0, attn_mask = mask)
+        if mask is None:
+            y = flash_attn_func(q, k, v, dropout_p=self.att_dropout if self.training else 0.0)
+        else:
+            y = torch.nn.functional.scaled_dot_product_attention(q, k, v, dropout_p=self.att_dropout if self.training else 0.0, attn_mask = mask)
 
         # Reassemble all head outputs side by side
         y = y.transpose(1, 2).contiguous().view(B, T, self.n_heads * self.n_dim_head) # re-assemble all head outputs side by side
