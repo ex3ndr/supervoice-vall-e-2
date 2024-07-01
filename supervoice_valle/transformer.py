@@ -106,41 +106,44 @@ class AttentionBlock(torch.nn.Module):
 
     def forward(self, x, mask = None):
 
-        B, T, C = x.size() # batch size, sequence length, context width
+        with record_function("attention:pre"):
+            B, T, C = x.size() # batch size, sequence length, context width
 
-        # Residual
-        residual = x
+            # Residual
+            residual = x
 
-        # Input normalization
-        y = self.attention_ln(x)
+            # Input normalization
+            y = self.attention_ln(x)
 
-        # Calculation Q/K/V for each head
-        q, k, v = self.attention(y).chunk(3, dim = -1)
-        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b n h d', h = self.n_heads), (q, k, v))
+            # Calculation Q/K/V for each head
+            q, k, v = self.attention(y).chunk(3, dim = -1)
+            q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b n h d', h = self.n_heads), (q, k, v))
 
-        # Flash Attention
-        if mask is None:
-            y = flash_attn_func(q, k, v, dropout_p=self.att_dropout if self.training else 0.0)
-        else:
-            y = torch.nn.functional.scaled_dot_product_attention(q, k, v, dropout_p=self.att_dropout if self.training else 0.0, attn_mask = mask)
+        with record_function("attention:run"):
+            # Flash Attention
+            if mask is None:
+                y = flash_attn_func(q, k, v, dropout_p=self.att_dropout if self.training else 0.0)
+            else:
+                y = torch.nn.functional.scaled_dot_product_attention(q, k, v, dropout_p=self.att_dropout if self.training else 0.0, attn_mask = mask)
 
-        # Reassemble all head outputs side by side
-        y = y.transpose(1, 2).contiguous().view(B, T, self.n_heads * self.n_dim_head) # re-assemble all head outputs side by side
+        with record_function("post"):
+            # Reassemble all head outputs side by side
+            y = y.transpose(1, 2).contiguous().view(B, T, self.n_heads * self.n_dim_head) # re-assemble all head outputs side by side
 
-        # Output
-        y = self.attention_output(y)
-        # y = self.attention_output_dropout(y)
+            # Output
+            y = self.attention_output(y)
+            # y = self.attention_output_dropout(y)
 
-        # Residual
-        y = residual + y
-        residual = y
+            # Residual
+            y = residual + y
+            residual = y
 
-        # MLP
-        y = self.mlp_ln(y)
-        y = self.mlp_input(y)
-        y = F.gelu(y)
-        y = self.mlp_output_dropout(y)
-        y = self.mlp_output(y)
-        y = residual + y
+            # MLP
+            y = self.mlp_ln(y)
+            y = self.mlp_input(y)
+            y = F.gelu(y)
+            y = self.mlp_output_dropout(y)
+            y = self.mlp_output(y)
+            y = residual + y
 
         return y
