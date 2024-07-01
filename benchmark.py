@@ -113,7 +113,7 @@ def main():
             lr = lr_max / accelerator.num_processes
 
         # Load batch
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], profile_memory=True, record_shapes=True) as prof:
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA] if accelerator.is_main_process else [], profile_memory=True, record_shapes=True) as prof:
             for _ in range(train_grad_accum_every):
                 with accelerator.accumulate(model):
                     with accelerator.autocast():
