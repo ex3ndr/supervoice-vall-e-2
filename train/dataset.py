@@ -33,9 +33,9 @@ def load_sampler(index, dir, batch_size, tokenizer):
                 # Load text
                 with open(dir + id + ".txt", 'r') as file:
                     text = file.read()
-                    if text == "":
-                        raise Exception("Empty file")
                     text = tokenizer.encode(text) if random.random() < 0.3 else tokenizer.encode_sample(text) # 30% chance of sampling optimal
+                    if text.shape[0] == 0:
+                        raise Exception("Empty file")
 
                 # Load encoded
                 encoded = torch.load(dir + id + ".pt")
