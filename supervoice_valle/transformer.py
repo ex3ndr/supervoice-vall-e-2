@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from einops import rearrange, repeat, reduce, pack, unpack
 from torch.cuda.amp import autocast
 from .tensors import RMSNorm
-from flash_attn import flash_attn_func
+# from flash_attn import flash_attn_func
 from torch.profiler import record_function
 
 class Transformer(nn.Module):
@@ -121,12 +121,12 @@ class AttentionBlock(torch.nn.Module):
 
         with record_function("attention:run"):
             # Flash Attention
-            if mask is None:
-                y = flash_attn_func(q, k, v, dropout_p=self.att_dropout if self.training else 0.0)
-            else:
-                y = torch.nn.functional.scaled_dot_product_attention(q, k, v, dropout_p=self.att_dropout if self.training else 0.0, attn_mask = mask)
+            # if mask is None:
+             #y = flash_attn_func(q, k, v, dropout_p=self.att_dropout if self.training else 0.0)
+            #else:
+            y = torch.nn.functional.scaled_dot_product_attention(q, k, v, dropout_p=self.att_dropout if self.training else 0.0, attn_mask = mask)
 
-        with record_function("post"):
+        with record_function("attention:post"):
             # Reassemble all head outputs side by side
             y = y.transpose(1, 2).contiguous().view(B, T, self.n_heads * self.n_dim_head) # re-assemble all head outputs side by side
 
@@ -137,7 +137,7 @@ class AttentionBlock(torch.nn.Module):
             # Residual
             y = residual + y
             residual = y
-
+        with record_function("attention:post-post"):
             # MLP
             y = self.mlp_ln(y)
             y = self.mlp_input(y)

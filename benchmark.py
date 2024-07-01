@@ -57,6 +57,7 @@ train_compile = False
 
 # Train
 def main():
+    print("PyTorch: ", torch.__version__)
 
     # Prepare accelerator
     ddp_kwargs = DistributedDataParallelKwargs()
