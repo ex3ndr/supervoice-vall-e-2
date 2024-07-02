@@ -64,7 +64,7 @@ train_compile = False
 def main():
 
     # Prepare accelerator
-    ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
+    ddp_kwargs = DistributedDataParallelKwargs()
     accelerator = Accelerator(log_with="wandb", kwargs_handlers=[ddp_kwargs], gradient_accumulation_steps = train_grad_accum_every, mixed_precision=train_mixed_precision)
     device = accelerator.device
     output_dir = Path("./output")
@@ -180,67 +180,60 @@ def main():
             lr = lr_max / accelerator.num_processes
 
         # Load batch
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], profile_memory=True, record_shapes=True) as prof:
-            for _ in range(train_grad_accum_every):
-                with accelerator.accumulate(model):
-                    with accelerator.autocast():
+        for _ in range(train_grad_accum_every):
+            with accelerator.accumulate(model):
+                with accelerator.autocast():
+                    # Load batch
+                    audio, text = next(train_cycle)
 
-                        # Load Batch
-                        with record_function("load_batch"):
+                    # Split audio
+                    texts = []
+                    audio_full = []
+                    audio_partial = []
+                    audio_codecs = []
+                    for B in range(len(audio)):
+                        a = audio[B].squeeze(0)
+                        t = text[B].squeeze(0)
+                        audio_duration = a.shape[1]
+                        min_duration = 75 * 3
+                        max_duration = audio_duration // 2 
+                        if max_duration > min_duration:
+                            audio_split = random.randint(min_duration, max_duration)
+                        else:
+                            audio_split = max_duration
+                        audio_full.append(a[:, :audio_split].to(device, non_blocking=True))
+                        audio_partial.append(a[:, audio_split:].to(device, non_blocking=True))
+                        audio_codecs.append(random.randint(1, 7))
+                        texts.append(t.to(device, non_blocking=True))
 
-                            # Load batch
-                            audio, text = next(train_cycle)
-
-                            # Split audio
-                            texts = []
-                            audio_full = []
-                            audio_partial = []
-                            audio_codecs = []
-                            for B in range(len(audio)):
-                                a = audio[B].squeeze(0)
-                                t = text[B].squeeze(0)
-                                audio_duration = a.shape[1]
-                                min_duration = 75 * 3
-                                max_duration = audio_duration // 2 
-                                if max_duration > min_duration:
-                                    audio_split = random.randint(min_duration, max_duration)
-                                else:
-                                    audio_split = max_duration
-                                audio_full.append(a[:, :audio_split].to(device, non_blocking=True))
-                                audio_partial.append(a[:, audio_split:].to(device, non_blocking=True))
-                                audio_codecs.append(random.randint(1, 7))
-                                texts.append(t.to(device, non_blocking=True))
-
-                        # Forward
-                        with record_function("forward"):
-                            _, loss = model(
-                                condition_text = texts,
-                                condition_audio = audio_full,
-                                audio = audio_partial,
-                                codec = audio_codecs,
-                                loss = True
-                            )
+                # Forward
+                with record_function("forward"):
+                    _, loss = model(
+                        condition_text = texts,
+                        condition_audio = audio_full,
+                        audio = audio_partial,
+                        codec = audio_codecs,
+                        loss = True
+                    )
                     
-                            # Check if loss is NaN
+                    # Check if loss is NaN
+                    # if torch.isnan(loss):
+                    #     raise ValueError("Loss is NaN")
+                        
+                # Backprop
+                with record_function("backward"):
+                    optim.zero_grad()
+                    accelerator.backward(loss)
+                    if accelerator.sync_gradients:
+                        accelerator.clip_grad_norm_(model.parameters(), train_clip_grad_norm)
+                    optim.step()
+
+                    # Log skipping step
+                    if not train_schedule_free:
+                        if optim.step_was_skipped:
+                            accelerator.print("Step was skipped")
                             if torch.isnan(loss):
                                 raise ValueError("Loss is NaN")
-                        
-                        # Backprop
-                        with record_function("backward"):
-                            optim.zero_grad()
-                            accelerator.backward(loss)
-                            if accelerator.sync_gradients:
-                                accelerator.clip_grad_norm_(model.parameters(), train_clip_grad_norm)
-                            optim.step()
-
-                            # Log skipping step
-                            if not train_schedule_free:
-                                if optim.step_was_skipped:
-                                    accelerator.print("Step was skipped")
-        
-        if accelerator.is_main_process:
-            print(prof.key_averages().table(sort_by="self_cpu_memory_usage", row_limit=50))
-            print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=50))
         
         return loss, lr
 
