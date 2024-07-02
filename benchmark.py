@@ -94,6 +94,8 @@ def main():
         model = torch.compile(model, mode="reduce-overhead")
     model, optim = accelerator.prepare(model, optim)
 
+    # torch.cuda.set_sync_debug_mode("error")
+
     # Train step
     def train_step():
         model.train()
@@ -140,10 +142,11 @@ def main():
                                     audio_split = random.randint(min_duration, max_duration)
                                 else:
                                     audio_split = max_duration
-                                audio_full.append(a[:, :audio_split].to(device, non_blocking=True))
-                                audio_partial.append(a[:, audio_split:].to(device, non_blocking=True))
-                                audio_codecs.append(random.randint(1, 7))
-                                texts.append(t.to(device, non_blocking=True))
+                                with record_function("load_batch:append"):
+                                    audio_full.append(a[:, :audio_split].to(device, non_blocking=True))
+                                    audio_partial.append(a[:, audio_split:].to(device, non_blocking=True))
+                                    audio_codecs.append(random.randint(1, 7))
+                                    texts.append(t.to(device, non_blocking=True))
 
                         # Forward
                         with record_function("forward"):
@@ -155,9 +158,9 @@ def main():
                                 loss = True
                             )
                     
-                            # Check if loss is NaN
-                            if torch.isnan(loss):
-                                raise ValueError("Loss is NaN")
+                            # # Check if loss is NaN
+                            # if torch.isnan(loss):
+                            #     raise ValueError("Loss is NaN")
                         
                         # Backprop
                         with record_function("backward"):
