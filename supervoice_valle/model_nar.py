@@ -44,7 +44,8 @@ class SupervoceNARModel(torch.nn.Module):
         torch.nn.init.normal_(self.codec_index_embedding.weight, mean=0.0, std=0.02)
 
         # Output prediction
-        self.prediction = torch.nn.Linear(self.n_dim, 1024, bias=False)
+        # self.prediction = torch.nn.Linear(self.n_dim, 1024, bias=False)
+        self.prediction = torch.nn.Linear(self.n_dim, 1024)
     
     def forward(self, *, condition_text, condition_audio, audio, codec, loss = False):
 

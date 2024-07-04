@@ -92,7 +92,8 @@ class AttentionBlock(torch.nn.Module):
         # self.attention_dropout = nn.Dropout(att_dropout)
 
         # Output flatten multiple heads into single tensor
-        self.attention_output = nn.Linear(n_dim_head * n_heads, n_dim, bias=False)
+        # self.attention_output = nn.Linear(n_dim_head * n_heads, n_dim, bias=False)
+        self.attention_output = nn.Linear(n_dim_head * n_heads, n_dim)
         torch.nn.init.normal_(self.attention_output.weight, mean=0.0, std=0.02)
 
         # Attention dropout
