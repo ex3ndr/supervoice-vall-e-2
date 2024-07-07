@@ -145,14 +145,16 @@ class SupervoceNARModel(torch.nn.Module):
             for b in range(B):
                 x.append(torch.cat([x_t[b], x_a[b], x_ci[b]]))
             x, m = list_to_tensors(x)
-            m = m.unsqueeze(-1).unsqueeze(-1)
-            m = m.contiguous()
+            # print(m)
+            # m.expand(-1, heads, q_len, -1)
+            # m = m.unsqueeze(-1).unsqueeze(-1)
+            # m = m.contiguous()
 
         #
         # Transform
         #
-
-        x = self.transformer(x, mask = m)
+        print(m)
+        x = self.transformer(x)
 
         #
         # Predict

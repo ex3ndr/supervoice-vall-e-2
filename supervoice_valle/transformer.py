@@ -126,18 +126,13 @@ class AttentionBlock(torch.nn.Module):
 
             # Calculation Q/K/V for each head
             q, k, v = self.attention(y).chunk(3, dim = -1)
-            q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b n h d', h = self.n_heads), (q, k, v))
 
         with record_function("attention:run"):
-            # Flash Attention
-            # if mask is None:
-             #y = flash_attn_func(q, k, v, dropout_p=self.att_dropout if self.training else 0.0)
-            #else:
+            q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.n_heads), (q, k, v))
             y = torch.nn.functional.scaled_dot_product_attention(q, k, v, dropout_p=self.att_dropout if self.training else 0.0, attn_mask = mask)
+            y = rearrange(y, 'b h n d -> b n (h d)')
 
         with record_function("attention:post"):
-            # Reassemble all head outputs side by side
-            y = y.transpose(1, 2).contiguous().view(B, T, self.n_heads * self.n_dim_head) # re-assemble all head outputs side by side
 
             # Output
             y = self.attention_output(y)

@@ -1,6 +1,6 @@
 /external_datasets
-/.ipynb_checkpoints
 /output
 .env
 __pycache__
 /wandb
+.ipynb_checkpoints
