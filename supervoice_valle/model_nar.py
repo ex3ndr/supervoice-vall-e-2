@@ -25,7 +25,9 @@ class SupervoceNARModel(torch.nn.Module):
         # Sinusoidal positional embedding
         # self.register_buffer("positional_embedding", sinusoids(self.max_seq_len, self.n_dim))
         self.positional_embedding_text = torch.nn.Embedding(self.max_seq_len, self.n_dim)
+        torch.nn.init.normal_(self.positional_embedding_text.weight, mean=0.0, std=0.02)
         self.positional_embedding_audio = torch.nn.Embedding(self.max_seq_len, self.n_dim)
+        torch.nn.init.normal_(self.positional_embedding_audio.weight, mean=0.0, std=0.02)
 
         # Text Condition
         self.text_embedding = torch.nn.Embedding(8 * 1024, self.n_dim)
@@ -46,6 +48,9 @@ class SupervoceNARModel(torch.nn.Module):
         # Output prediction
         # self.prediction = torch.nn.Linear(self.n_dim, 1024, bias=False)
         self.prediction = torch.nn.Linear(self.n_dim, 1024)
+        torch.nn.init.normal_(self.prediction.weight, mean=0.0, std=0.02)
+        torch.nn.init.zeros_(self.prediction.bias)
+        
     
     def forward(self, *, condition_text, condition_audio, audio, codec, loss = False):
 

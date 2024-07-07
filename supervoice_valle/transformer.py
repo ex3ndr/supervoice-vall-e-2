@@ -95,14 +95,22 @@ class AttentionBlock(torch.nn.Module):
         # self.attention_output = nn.Linear(n_dim_head * n_heads, n_dim, bias=False)
         self.attention_output = nn.Linear(n_dim_head * n_heads, n_dim)
         torch.nn.init.normal_(self.attention_output.weight, mean=0.0, std=0.02)
+        torch.nn.init.zeros_(self.attention_output.bias)
 
         # Attention dropout
         # self.attention_output_dropout = nn.Dropout(dropout)
 
         # MLP part
         self.mlp_ln = RMSNorm(n_dim)
+        
         self.mlp_input = nn.Linear(n_dim, n_dim_ffn)
+        torch.nn.init.normal_(self.mlp_input.weight, mean=0.0, std=0.02)
+        torch.nn.init.zeros_(self.mlp_input.bias)
+
         self.mlp_output = nn.Linear(n_dim_ffn, n_dim)
+        torch.nn.init.normal_(self.mlp_output.weight, mean=0.0, std=0.02)
+        torch.nn.init.zeros_(self.mlp_output.bias)
+
         self.mlp_output_dropout = nn.Dropout(ffn_dropout)
 
     def forward(self, x, mask = None):
