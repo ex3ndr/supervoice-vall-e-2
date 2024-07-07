@@ -146,6 +146,7 @@ class SupervoceNARModel(torch.nn.Module):
                 x.append(torch.cat([x_t[b], x_a[b], x_ci[b]]))
             x, m = list_to_tensors(x)
             m = m.unsqueeze(-1).unsqueeze(-1)
+            m = m.contiguous()
 
         #
         # Transform
