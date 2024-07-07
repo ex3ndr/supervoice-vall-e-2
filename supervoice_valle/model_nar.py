@@ -151,7 +151,7 @@ class SupervoceNARModel(torch.nn.Module):
         # Transform
         #
 
-        x = self.transformer(x)
+        x = self.transformer(x, mask = m)
 
         #
         # Predict
