@@ -5,7 +5,6 @@ warnings.filterwarnings("ignore")
 # Base
 import itertools
 from glob import glob
-import textgrid
 from tqdm import tqdm
 import time
 from contextlib import nullcontext
@@ -32,7 +31,7 @@ from supervoice_valle import SupervoceNARModel, Tokenizer
 from train.dataset import load_sampler, create_async_loader
 
 # Train parameters
-train_experiment = "valle-30"
+train_experiment = "valle-35"
 train_project="supervoice-valle"
 train_auto_resume = True
 
@@ -45,7 +44,7 @@ train_batch_size = 8
 
 # We speculate that learning rate is given for all GPUs, so we divide it by number of GPUs
 train_lr_start = 1e-12
-train_lr_max = 1e-5
+train_lr_max = 5e-4
 train_steps = 600000
 train_warmup_steps = 32000 # I am using faster warmup - it is more natural for me after working on voicebox
 train_schedule_free = False
@@ -57,7 +56,7 @@ train_watch_every = 1000
 train_evaluate_every = 200
 train_evaluate_batches = 10
 train_mixed_precision = "fp16" # "bf16" or "fp16" or None
-train_clip_grad_norm = 0.2 # Common reproductions are using 100, but i am usually use 0.2
+train_clip_grad_norm = 1 # Common reproductions are using 100 or 1
 train_compile = False
 
 # Train
@@ -81,8 +80,8 @@ def main():
     accelerator.print("Loading dataset...")
     tokenizer = Tokenizer("./tokenizer_text.model")
     # train_sampler = load_sampler("./external_datasets/libriheavy/libriheavy_cuts_medium.jsonl.gz", "./external_datasets/libriheavy-medium-encodec/", train_batch_size, tokenizer)
-    train_sampler = load_sampler("./external_datasets/libriheavy/libriheavy_cuts_large.jsonl.gz", "./external_datasets/libriheavy-large-encodec/", train_batch_size, tokenizer)
-    # train_sampler = load_sampler("./external_datasets/libriheavy/libriheavy_cuts_small.jsonl.gz", "./external_datasets/libriheavy-encodec/", train_batch_size, tokenizer)
+    # train_sampler = load_sampler("./external_datasets/libriheavy/libriheavy_cuts_large.jsonl.gz", "./external_datasets/libriheavy-large-encodec/", train_batch_size, tokenizer)
+    train_sampler = load_sampler("./external_datasets/libriheavy/libriheavy_cuts_small.jsonl.gz", "./external_datasets/libriheavy-encodec/", train_batch_size, tokenizer)
     train_loader = create_async_loader(train_sampler, num_workers = train_loader_workers)
     train_cycle = cycle(train_loader)
 
@@ -218,10 +217,6 @@ def main():
 
                     # Rescale loss
                     loss = loss / train_grad_accum_every
-                    
-                    # Check if loss is NaN
-                    # if torch.isnan(loss):
-                    #     raise ValueError("Loss is NaN")
                         
                 # Backprop
                 with record_function("backward"):
@@ -238,7 +233,7 @@ def main():
                             if torch.isnan(loss):
                                 raise ValueError("Loss is NaN")
         
-        return loss, lr
+        return loss * train_grad_accum_every, lr
 
     #
     # Start Training
