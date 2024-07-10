@@ -97,9 +97,6 @@ class AttentionBlock(torch.nn.Module):
         torch.nn.init.normal_(self.attention_output.weight, mean=0.0, std=0.02)
         torch.nn.init.zeros_(self.attention_output.bias)
 
-        # Attention dropout
-        # self.attention_output_dropout = nn.Dropout(dropout)
-
         # MLP part
         self.mlp_ln = RMSNorm(n_dim)
         
@@ -127,20 +124,28 @@ class AttentionBlock(torch.nn.Module):
             # Calculation Q/K/V for each head
             q, k, v = self.attention(y).chunk(3, dim = -1)
 
-        with record_function("attention:run"):
+            # Reshape for head-first attention
             q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.n_heads), (q, k, v))
-            y = torch.nn.functional.scaled_dot_product_attention(q, k, v, dropout_p=self.att_dropout if self.training else 0.0, attn_mask = mask)
-            y = rearrange(y, 'b h n d -> b n (h d)')
 
-        with record_function("attention:post"):
+            # Prepare mask
+            # mask = None
+            # if padding_mask is not None:
+            #     mask = rearrange(mask, "b j -> b 1 1 j")
+            #     mask = mask.expand(-1, self.d_heads, q_len, -1)
+            
+            # Run through attention
+            y = torch.nn.functional.scaled_dot_product_attention(q, k, v, dropout_p=self.att_dropout if self.training else 0.0, attn_mask = mask)
+
+            # Reshape back
+            y = rearrange(y, 'b h n d -> b n (h d)')
 
             # Output
             y = self.attention_output(y)
-            # y = self.attention_output_dropout(y)
 
             # Residual
             y = residual + y
             residual = y
+
         with record_function("attention:post-post"):
             # MLP
             y = self.mlp_ln(y)

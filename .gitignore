@@ -4,3 +4,4 @@
 __pycache__
 /wandb
 .ipynb_checkpoints
+train_tokenizer_text.txt
