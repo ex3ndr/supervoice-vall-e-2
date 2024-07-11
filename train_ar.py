@@ -31,7 +31,7 @@ from supervoice_valle import SupervoceARModel, Tokenizer
 from train.dataset import load_sampler, create_async_loader
 
 # Train parameters
-train_experiment = "valle-ar-1"
+train_experiment = "valle-ar-2"
 train_project="supervoice-valle-ar"
 train_auto_resume = True
 

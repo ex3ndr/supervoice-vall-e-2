@@ -60,7 +60,7 @@ class Transformer(nn.Module):
 
             # Attention
             with record_function("attention"):
-                x = self.layers[i](x, mask = mask)
+                x = self.layers[i](x, mask = mask, casual = casual)
 
             # Skip connection
             if i <= self.n_layers // 2:

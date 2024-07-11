@@ -76,8 +76,14 @@ class SupervoceARModel(torch.nn.Module):
         l_t = []
         x_t = []
         for b in range(B):
+
+            # Text
             t = torch.cat([self.text_embedding(text[b]), eos])
+
+            # Positional embedding
             t = t + self.positional_embedding_text(torch.arange(t.shape[0]).to(t.device, non_blocking=True))
+
+            # Append
             x_t.append(t)
             l_t.append(t.shape[0])
 
@@ -89,11 +95,8 @@ class SupervoceARModel(torch.nn.Module):
         l_a = []
         for b in range(B):
 
-            # Condition embedding
-            t = self.audio_embedding(audio[b])
-
-            # Concatenate all
-            t = torch.cat([bos, t])
+            # Audio
+            t = torch.cat([bos, self.audio_embedding(audio[b])])
 
             # Positional embedding
             t = t + self.positional_embedding_audio(torch.arange(t.shape[0]).to(t.device, non_blocking=True))
