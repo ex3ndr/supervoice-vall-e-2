@@ -5,6 +5,31 @@ from einops import rearrange
 import xformers.ops as xops
 from flash_attn import flash_attn_func, flash_attn_varlen_func
 
+class AttendMask:
+    def __init__(self, *, lengths, device):
+        super().__init__()
+        self.lengths = lengths
+        self.device = device
+
+    def flash_attention_mask(self):
+
+        if self.flash_mask is not None:
+            return self.flash_mask
+
+        # Max lengths
+        max_len = torch.tensor(max(lengths), dtype = q.dtype, device = self.device)
+
+        # Seq lens
+        seqlens = [0]
+        last = 0
+        for l in lengths:
+            last += l
+            seqlens.append(last)
+        seqlens = torch.tensor(seqlens, dtype = torch.int32, device =self.device)
+
+        self.flash_mask = (max_len, seqlens)
+        return self.flash_mask
+
 class Attend(torch.nn.Module):
     def __init__(self, *, heads, engine = "direct"):
         super().__init__()

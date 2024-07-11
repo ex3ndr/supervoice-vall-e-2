@@ -110,7 +110,7 @@ class AttentionBlock(torch.nn.Module):
 
         self.mlp_output_dropout = nn.Dropout(ffn_dropout)
 
-    def forward(self, x, mask = None):
+    def forward(self, x, mask = None, casual = False):
 
         with record_function("attention:pre"):
             B, T, C = x.size() # batch size, sequence length, context width
@@ -134,7 +134,7 @@ class AttentionBlock(torch.nn.Module):
             #     mask = mask.expand(-1, self.d_heads, q_len, -1)
             
             # Run through attention
-            y = torch.nn.functional.scaled_dot_product_attention(q, k, v, dropout_p=self.att_dropout if self.training else 0.0, attn_mask = mask)
+            y = torch.nn.functional.scaled_dot_product_attention(q, k, v, dropout_p=self.att_dropout if self.training else 0.0, attn_mask = mask, is_causal = casual)
 
             # Reshape back
             y = rearrange(y, 'b h n d -> b n (h d)')

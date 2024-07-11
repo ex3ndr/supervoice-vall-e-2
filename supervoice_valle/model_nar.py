@@ -22,7 +22,7 @@ class SupervoceNARModel(torch.nn.Module):
             ffn_dropout = 0.1
         )
 
-        # Sinusoidal positional embedding
+        # Positional embeddings
         # self.register_buffer("positional_embedding", sinusoids(self.max_seq_len, self.n_dim))
         self.positional_embedding_text = torch.nn.Embedding(self.max_seq_len, self.n_dim)
         torch.nn.init.normal_(self.positional_embedding_text.weight, mean=0.0, std=0.02)
