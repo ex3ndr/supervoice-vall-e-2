@@ -39,7 +39,7 @@ train_auto_resume = True
 # 6k tokens is routhly 3 rows, because a single row is a 1500-2500 tokens
 # We have MUCH faster GPUs and therefore instead of gradient accumulation,
 # we increase batch size 4x and reduce number of gradients to just 4x
-train_grad_accum_every = 8
+train_grad_accum_every = 2
 train_batch_size = 8
 
 # We speculate that learning rate is given for all GPUs, so we divide it by number of GPUs
