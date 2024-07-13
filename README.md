@@ -1,5 +1,5 @@
 # ✨ SuperVoice VALL-E 2
-An independent VALL-E 2 reproduction for voice synthesis
+An independent VALL-E 2 reproduction for voice synthesis with voice cloning.
 
 ## Features
 
@@ -7,6 +7,14 @@ An independent VALL-E 2 reproduction for voice synthesis
 * 🎤 High quality - 24khz audio
 * 🤹‍♂️ Versatile - synthesiszed voice has high variability
 * 📕 Currently only English language is supported, but nothing stops us from adding more languages.
+
+## Architecture
+
+Repdorduction tries to follow papers as close as possible, but some minor changes include
+* Linear annielation replaced with cosine one
+* Not implemented codec grouping
+
+![valle-2 arcitecture](/docs/arch.png)
 
 ## How to use
 
