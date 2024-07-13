@@ -1,4 +1,4 @@
-# ✨ SuperVoice VALL-E 2
+# ✨ Supervoice VALL-E 2
 An independent VALL-E 2 reproduction for voice synthesis with voice cloning.
 
 ## Features
