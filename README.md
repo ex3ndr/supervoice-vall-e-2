@@ -13,6 +13,7 @@ An independent VALL-E 2 reproduction for voice synthesis with voice cloning.
 Repdorduction tries to follow papers as close as possible, but some minor changes include
 * Linear annielation replaced with cosine one
 * Not implemented codec grouping
+* No padding masking used during training, since it would train 5 times slower using flash attention
 
 ![valle-2 arcitecture](/docs/arch.png)
 
