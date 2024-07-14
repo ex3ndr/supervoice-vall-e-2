@@ -1,0 +1,1 @@
+available_voices = ['voice_3', 'voice_1', 'voice_2']
