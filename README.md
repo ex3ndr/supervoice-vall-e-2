@@ -1,6 +1,8 @@
 # ✨ Supervoice VALL-E 2
 An independent VALL-E 2 reproduction for voice synthesis with voice cloning.
 
+https://github.com/user-attachments/assets/484362c5-7397-48f3-88df-b881ee491571
+
 ## Features
 
 * ⚡️ Narural sounding and voice cloning on human level
