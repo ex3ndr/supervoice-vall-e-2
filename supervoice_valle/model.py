@@ -41,22 +41,16 @@ class Supervoice(nn.Module):
         
         # Prepare text
         text = self._normalize_text(text)
-
-        # Tokenize text
-        text_tokens = self.tokenizer.encode(text)
         
         # Return
         return {
             "audio_tokens": audio_tokens,
-            "text_tokens": text_tokens,
+            "text": text,
         }
 
     @torch.inference_mode()
     def synthesize(self, voice, text, top_k = None, top_p = 0.2):
         device = self._device()
-
-        # Prepare text
-        text = self._normalize_text(text)
 
         # Prepare voice
         if type(voice) is str:
@@ -73,7 +67,7 @@ class Supervoice(nn.Module):
             voice = torch.load(voice_file, map_location = "cpu")
 
         # Tokenize text
-        text_tokens = torch.cat([voice["text_tokens"].to(device), self.tokenizer.encode(text).to(device)])
+        text_tokens = self.tokenizer.encode(self._normalize_text(voice["text"]) + " " + self._normalize_text(text)).to(device)
 
         # Audio tokens
         audio_tokens = voice["audio_tokens"].to(device)        

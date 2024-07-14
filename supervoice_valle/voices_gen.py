@@ -1,1 +1,1 @@
-available_voices = ['voice_3', 'voice_1', 'voice_2']
+available_voices = ['emo_2', 'voice_1', 'emo_1', 'voice_2']

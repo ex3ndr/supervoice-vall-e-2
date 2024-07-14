@@ -14,7 +14,7 @@ encodec_model.set_target_bandwidth(6.0)
 model = Supervoice(None, None, encodec_model, None, tokenizer)
 
 # Find all wav files in the voices directory
-wav_files = list(Path('voices').glob('*.wav'))
+wav_files = list(Path('voices').glob('*.flac'))
 wav_files = [f.stem for f in wav_files]
 
 # Generate voices
@@ -22,7 +22,7 @@ for id in wav_files:
     print(f"Processing {id}")
     with open("./voices/" + id + ".txt", 'r') as f:
         text = f.read().strip()
-    created_voice = model.create_voice(audio = "./voices/" + id + ".wav", text = text)
+    created_voice = model.create_voice(audio = "./voices/" + id + ".flac", text = text)
     torch.save(created_voice, f"./voices/{id}.pt")
 
 # Generate index file
