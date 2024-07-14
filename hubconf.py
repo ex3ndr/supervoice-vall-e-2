@@ -1,4 +1,4 @@
-dependencies = ['torch', 'torchaudio']
+dependencies = ['torch', 'torchaudio', 'vocos', 'encodec']
 
 def supervoice():
 
@@ -6,6 +6,8 @@ def supervoice():
     import torch
     import os
     from supervoice_valle import SupervoceNARModel, SupervoceARModel, Tokenizer, Supervoice
+    from vocos import Vocos
+    from encodec import EncodecModel
 
     # Load tokenizer
     tokenizer = Tokenizer(os.path.join(os.path.dirname(__file__), "tokenizer_text.model"))
